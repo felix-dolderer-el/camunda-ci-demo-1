@@ -1,0 +1,43 @@
+name: Deploy BPMN to Camunda 7
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.bpmn'
+
+jobs:
+  deploy-bpmn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Deploy all BPMN files to Camunda
+        run: |
+          # Find all .bpmn files
+          BPMN_FILES=$(find . -type f -name "*.bpmn")
+
+          if [ -z "$BPMN_FILES" ]; then
+            echo "No BPMN files found. Skipping deployment."
+            exit 0
+          fi
+
+          # Build form parameters for curl
+          FORM_ARGS=""
+          for f in $BPMN_FILES; do
+            FORM_ARGS="$FORM_ARGS -F file=@$f"
+          done
+
+          # Deployment name: <repo>-<branch>-<short-sha>
+          DEPLOYMENT_NAME="${GITHUB_REPOSITORY##*/}-${GITHUB_REF_NAME}-$(echo $GITHUB_SHA | cut -c1-7)"
+
+          echo "Deploying to Camunda with name: $DEPLOYMENT_NAME"
+
+          # Deploy to Camunda via REST API
+          curl -s -o /dev/null -w "%{http_code}\n" \
+            -u "${{ secrets.CAMUNDA_USER }}:${{ secrets.CAMUNDA_PASS }}" \
+            -F "deployment-name=$DEPLOYMENT_NAME" \
+            -F "deploy-changed-only=true" \
+            $FORM_ARGS \
+            "${{ secrets.CAMUNDA_URL }}/engine-rest/deployment/create"
