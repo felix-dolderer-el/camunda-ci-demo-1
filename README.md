@@ -1,3 +1,6 @@
+> [!WARNING]
+> This README has been written by AI and has not been manually reviewed. The only functionality that has been thoroughly tested is the deployment behavior of the [bmpn-deploy.yml GitHub Action](/.github/workflows/bpmn-deploy.yml).
+
 # Camunda CI Demo 1
 
 A demonstration project showcasing Camunda external task workers using TypeScript and Bun. This project implements a simple order processing workflow with validation and conditional logic.
