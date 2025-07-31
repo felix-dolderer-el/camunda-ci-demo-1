@@ -5,39 +5,206 @@ on:
     branches: [ main ]
     paths:
       - '**.bpmn'
+      - '.github/workflows/bpmn-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no BPMN files changed'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CAMUNDA_API_VERSION: 'v1'
 
 jobs:
   deploy-bpmn:
+    name: Deploy BPMN files to Camunda
     runs-on: ubuntu-latest
+    
+    # Explicit permissions for security
+    permissions:
+      contents: read
+      id-token: write
+    
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better commit info
 
-      - name: Deploy all BPMN files to Camunda
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Find BPMN files
+        id: find-bpmn
         run: |
-          # Find all .bpmn files
-          BPMN_FILES=$(find . -type f -name "*.bpmn")
-
+          # Find all .bpmn files with better error handling
+          BPMN_FILES=$(find . -type f -name "*.bpmn" -not -path "./node_modules/*" -not -path "./.git/*" | sort)
+          
           if [ -z "$BPMN_FILES" ]; then
-            echo "No BPMN files found. Skipping deployment."
-            exit 0
+            echo "No BPMN files found in the repository."
+            echo "bpmn_files_count=0" >> $GITHUB_OUTPUT
+            echo "bpmn_files_list=" >> $GITHUB_OUTPUT
+          else
+            echo "Found BPMN files:"
+            echo "$BPMN_FILES" | while read -r file; do
+              echo "  - $file"
+            done
+            
+            # Count files and create list for output
+            BPMN_COUNT=$(echo "$BPMN_FILES" | wc -l)
+            echo "bpmn_files_count=$BPMN_COUNT" >> $GITHUB_OUTPUT
+            echo "bpmn_files_list<<EOF" >> $GITHUB_OUTPUT
+            echo "$BPMN_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           fi
 
-          # Build form parameters for curl
-          FORM_ARGS=""
-          for f in $BPMN_FILES; do
-            FORM_ARGS="$FORM_ARGS -F file=@$f"
+      - name: Validate BPMN files
+        if: steps.find-bpmn.outputs.bpmn_files_count != '0'
+        run: |
+          echo "Validating BPMN files..."
+          for file in ${{ steps.find-bpmn.outputs.bpmn_files_list }}; do
+            echo "Validating: $file"
+            
+            # Basic XML validation
+            if ! xmllint --noout "$file" 2>/dev/null; then
+              echo "❌ Error: $file is not valid XML"
+              exit 1
+            fi
+            
+            # Check if it's a valid BPMN file
+            if ! grep -q "bpmn:" "$file"; then
+              echo "❌ Error: $file does not appear to be a valid BPMN file"
+              exit 1
+            fi
+            
+            echo "✅ $file is valid"
           done
 
-          # Deployment name: <repo>-<branch>-<short-sha>
-          DEPLOYMENT_NAME="${GITHUB_REPOSITORY##*/}-${GITHUB_REF_NAME}-$(echo $GITHUB_SHA | cut -c1-7)"
+      - name: Skip deployment if no BPMN files
+        if: steps.find-bpmn.outputs.bpmn_files_count == '0' && github.event.inputs.force_deploy != 'true'
+        run: |
+          echo "No BPMN files found and force deployment not requested. Skipping deployment."
+          exit 0
 
+      - name: Deploy BPMN files to Camunda
+        if: steps.find-bpmn.outputs.bpmn_files_count != '0' || github.event.inputs.force_deploy == 'true'
+        id: deploy
+        run: |
+          # Validate required secrets
+          if [ -z "${{ secrets.CAMUNDA_URL }}" ]; then
+            echo "❌ Error: CAMUNDA_URL secret is not set"
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.CAMUNDA_USER }}" ] || [ -z "${{ secrets.CAMUNDA_PASS }}" ]; then
+            echo "❌ Error: CAMUNDA_USER or CAMUNDA_PASS secrets are not set"
+            exit 1
+          fi
+          
+          # Test Camunda connection
+          echo "Testing connection to Camunda..."
+          if ! curl -s -f -u "${{ secrets.CAMUNDA_USER }}:${{ secrets.CAMUNDA_PASS }}" \
+            "${{ secrets.CAMUNDA_URL }}/engine-rest/process-definition" > /dev/null; then
+            echo "❌ Error: Cannot connect to Camunda. Check URL and credentials."
+            exit 1
+          fi
+          
+          echo "✅ Connection to Camunda successful"
+          
+          # Build deployment name with better format
+          DEPLOYMENT_NAME="${GITHUB_REPOSITORY##*/}-${GITHUB_REF_NAME}-$(echo $GITHUB_SHA | cut -c1-8)-$(date +%Y%m%d-%H%M%S)"
+          echo "deployment_name=$DEPLOYMENT_NAME" >> $GITHUB_OUTPUT
+          
           echo "Deploying to Camunda with name: $DEPLOYMENT_NAME"
-
-          # Deploy to Camunda via REST API
-          curl -s -o /dev/null -w "%{http_code}\n" \
+          
+          # Build form parameters for curl with better error handling
+          FORM_ARGS=""
+          BPMN_FILES="${{ steps.find-bpmn.outputs.bpmn_files_list }}"
+          
+          if [ -n "$BPMN_FILES" ]; then
+            for f in $BPMN_FILES; do
+              if [ -f "$f" ]; then
+                FORM_ARGS="$FORM_ARGS -F file=@$f"
+                echo "Adding file to deployment: $f"
+              else
+                echo "⚠️ Warning: File not found: $f"
+              fi
+            done
+          else
+            echo "⚠️ Warning: No BPMN files to deploy"
+          fi
+          
+          # Deploy to Camunda via REST API with better error handling
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
             -u "${{ secrets.CAMUNDA_USER }}:${{ secrets.CAMUNDA_PASS }}" \
             -F "deployment-name=$DEPLOYMENT_NAME" \
             -F "deploy-changed-only=true" \
+            -F "enable-duplicate-filtering=true" \
             $FORM_ARGS \
-            "${{ secrets.CAMUNDA_URL }}/engine-rest/deployment/create"
+            "${{ secrets.CAMUNDA_URL }}/engine-rest/deployment/create")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "Response code: $HTTP_CODE"
+          echo "Response body: $RESPONSE_BODY"
+          
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 201 ]; then
+            echo "✅ Deployment successful"
+            echo "deployment_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Deployment failed with HTTP code: $HTTP_CODE"
+            echo "Response: $RESPONSE_BODY"
+            echo "deployment_success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Verify deployment
+        if: steps.deploy.outputs.deployment_success == 'true'
+        run: |
+          echo "Verifying deployment..."
+          sleep 5  # Give Camunda time to process
+          
+          # Check if deployment exists
+          DEPLOYMENT_NAME="${{ steps.deploy.outputs.deployment_name }}"
+          
+          DEPLOYMENT_CHECK=$(curl -s -u "${{ secrets.CAMUNDA_USER }}:${{ secrets.CAMUNDA_PASS }}" \
+            "${{ secrets.CAMUNDA_URL }}/engine-rest/deployment?name=$DEPLOYMENT_NAME")
+          
+          if echo "$DEPLOYMENT_CHECK" | grep -q "$DEPLOYMENT_NAME"; then
+            echo "✅ Deployment verification successful"
+          else
+            echo "⚠️ Warning: Could not verify deployment in Camunda"
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **BPMN Files Found:** ${{ steps.find-bpmn.outputs.bpmn_files_count }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.deploy.outputs.deployment_success }}" == "true" ]; then
+            echo "- **Deployment Name:** ${{ steps.deploy.outputs.deployment_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.find-bpmn.outputs.bpmn_files_count }}" != "0" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.find-bpmn.outputs.bpmn_files_list }}" | while read -r file; do
+              echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
