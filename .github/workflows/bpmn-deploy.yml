@@ -33,38 +33,53 @@ jobs:
         with:
           fetch-depth: 0  # Full history for better commit info
 
-      - name: Find BPMN files
-        id: find-bpmn
+      - name: Check for changed BPMN files
+        id: check-changed-bpmn
         run: |
-          # Find all .bpmn files with better error handling
-          BPMN_FILES=$(find . -type f -name "*.bpmn" -not -path "./node_modules/*" -not -path "./.git/*" | sort)
-          
-          if [ -z "$BPMN_FILES" ]; then
-            echo "No BPMN files found in the repository."
-            echo "bpmn_files_count=0" >> $GITHUB_OUTPUT
-            echo "bpmn_files_list=" >> $GITHUB_OUTPUT
+          # Get the previous commit SHA (for push events)
+          if [ "${{ github.event_name }}" == "push" ]; then
+            PREVIOUS_COMMIT="${{ github.event.before }}"
           else
-            echo "Found BPMN files:"
-            echo "$BPMN_FILES" | while read -r file; do
+            # For workflow_dispatch, compare with the last commit
+            PREVIOUS_COMMIT=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          fi
+          
+          # If we have a previous commit, check what BPMN files changed
+          if [ -n "$PREVIOUS_COMMIT" ]; then
+            echo "Checking for BPMN files changed between $PREVIOUS_COMMIT and ${{ github.sha }}"
+            CHANGED_BPMN_FILES=$(git diff --name-only --diff-filter=ACM "$PREVIOUS_COMMIT" "${{ github.sha }}" | grep '\.bpmn$' | sort)
+          else
+            # If no previous commit (first commit), check all BPMN files in the current commit
+            echo "No previous commit found, checking all BPMN files in current commit"
+            CHANGED_BPMN_FILES=$(git ls-files | grep '\.bpmn$' | sort)
+          fi
+          
+          if [ -z "$CHANGED_BPMN_FILES" ]; then
+            echo "No BPMN files were changed in this commit."
+            echo "changed_bpmn_count=0" >> $GITHUB_OUTPUT
+            echo "changed_bpmn_list=" >> $GITHUB_OUTPUT
+          else
+            echo "BPMN files changed in this commit:"
+            echo "$CHANGED_BPMN_FILES" | while read -r file; do
               echo "  - $file"
             done
             
             # Count files and create list for output
-            BPMN_COUNT=$(echo "$BPMN_FILES" | wc -l)
-            echo "bpmn_files_count=$BPMN_COUNT" >> $GITHUB_OUTPUT
-            echo "bpmn_files_list<<EOF" >> $GITHUB_OUTPUT
-            echo "$BPMN_FILES" >> $GITHUB_OUTPUT
+            CHANGED_COUNT=$(echo "$CHANGED_BPMN_FILES" | wc -l)
+            echo "changed_bpmn_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
+            echo "changed_bpmn_list<<EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGED_BPMN_FILES" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 
-      - name: Skip deployment if no BPMN files
-        if: steps.find-bpmn.outputs.bpmn_files_count == '0' && github.event.inputs.force_deploy != 'true'
+      - name: Skip deployment if no BPMN files changed
+        if: steps.check-changed-bpmn.outputs.changed_bpmn_count == '0' && github.event.inputs.force_deploy != 'true'
         run: |
-          echo "No BPMN files found and force deployment not requested. Skipping deployment."
+          echo "No BPMN files were changed in this commit and force deployment not requested. Skipping deployment."
           exit 0
 
-      - name: Deploy BPMN files to Camunda
-        if: steps.find-bpmn.outputs.bpmn_files_count != '0' || github.event.inputs.force_deploy == 'true'
+      - name: Deploy changed BPMN files to Camunda
+        if: steps.check-changed-bpmn.outputs.changed_bpmn_count != '0' || github.event.inputs.force_deploy == 'true'
         id: deploy
         run: |
           # Validate required secrets
@@ -96,19 +111,19 @@ jobs:
           
           # Build form parameters for curl with better error handling
           FORM_ARGS=""
-          BPMN_FILES="${{ steps.find-bpmn.outputs.bpmn_files_list }}"
+          CHANGED_BPMN_FILES="${{ steps.check-changed-bpmn.outputs.changed_bpmn_list }}"
           
-          if [ -n "$BPMN_FILES" ]; then
-            for f in $BPMN_FILES; do
+          if [ -n "$CHANGED_BPMN_FILES" ]; then
+            for f in $CHANGED_BPMN_FILES; do
               if [ -f "$f" ]; then
                 FORM_ARGS="$FORM_ARGS -F file=@$f"
-                echo "Adding file to deployment: $f"
+                echo "Adding changed file to deployment: $f"
               else
-                echo "⚠️ Warning: File not found: $f"
+                echo "⚠️ Warning: Changed file not found: $f"
               fi
             done
           else
-            echo "⚠️ Warning: No BPMN files to deploy"
+            echo "⚠️ Warning: No changed BPMN files to deploy"
           fi
           
           # Deploy to Camunda via REST API with better error handling
@@ -157,30 +172,21 @@ jobs:
       - name: Deployment summary
         if: always()
         run: |
-          # Store values in variables to avoid masking
-          REPO_NAME="${{ github.repository }}"
-          BRANCH_NAME="${{ github.ref_name }}"
-          COMMIT_SHA="${{ github.sha }}"
-          BPMN_COUNT="${{ steps.find-bpmn.outputs.bpmn_files_count }}"
-          DEPLOYMENT_NAME="${{ steps.deploy.outputs.deployment_name }}"
-          DEPLOYMENT_SUCCESS="${{ steps.deploy.outputs.deployment_success }}"
-          BPMN_FILES_LIST="${{ steps.find-bpmn.outputs.bpmn_files_list }}"
-          
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** $REPO_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** $COMMIT_SHA" >> $GITHUB_STEP_SUMMARY
-          echo "- **BPMN Files Found:** $BPMN_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **BPMN Files Changed:** ${{ steps.check-changed-bpmn.outputs.changed_bpmn_count }}" >> $GITHUB_STEP_SUMMARY
           
-          if [ "$DEPLOYMENT_SUCCESS" == "true" ]; then
-            echo "- **Deployment Name:** $DEPLOYMENT_NAME" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.deploy.outputs.deployment_success }}" == "true" ]; then
+            echo "- **Deployment Name:** ${{ steps.deploy.outputs.deployment_name }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
             
             # Only show BPMN files if deployment was successful
-            if [ "$BPMN_COUNT" != "0" ]; then
+            if [ "${{ steps.check-changed-bpmn.outputs.changed_bpmn_count }}" != "0" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
-              echo "$BPMN_FILES_LIST" | while read -r file; do
+              echo "### Changed BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
+              echo "${{ steps.check-changed-bpmn.outputs.changed_bpmn_list }}" | while read -r file; do
                 echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
               done
             fi
