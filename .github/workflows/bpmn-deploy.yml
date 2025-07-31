@@ -178,11 +178,16 @@ jobs:
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **BPMN Files Changed:** ${{ steps.check-changed-bpmn.outputs.changed_bpmn_count }}" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ steps.deploy.outputs.deployment_success }}" == "true" ]; then
+          # Check if deployment step was skipped
+          if [ "${{ steps.check-changed-bpmn.outputs.changed_bpmn_count }}" == "0" ] && [ "${{ github.event.inputs.force_deploy }}" != "true" ]; then
+            echo "- **Status:** ⏭️ Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> ℹ️ No BPMN files were changed in this commit. Deployment skipped." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.deploy.outputs.deployment_success }}" == "true" ]; then
             echo "- **Deployment Name:** ${{ steps.deploy.outputs.deployment_name }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
             
-            # Only show BPMN files if deployment was successful
+            # Only show BPMN files if deployment was successful and files were changed
             if [ "${{ steps.check-changed-bpmn.outputs.changed_bpmn_count }}" != "0" ]; then
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "### Changed BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
