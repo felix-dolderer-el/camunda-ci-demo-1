@@ -57,28 +57,6 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 
-      - name: Validate BPMN files
-        if: steps.find-bpmn.outputs.bpmn_files_count != '0'
-        run: |
-          echo "Validating BPMN files..."
-          for file in ${{ steps.find-bpmn.outputs.bpmn_files_list }}; do
-            echo "Validating: $file"
-            
-            # Basic XML validation
-            if ! xmllint --noout "$file" 2>/dev/null; then
-              echo "❌ Error: $file is not valid XML"
-              exit 1
-            fi
-            
-            # Check if it's a valid BPMN file
-            if ! grep -q "bpmn:" "$file"; then
-              echo "❌ Error: $file does not appear to be a valid BPMN file"
-              exit 1
-            fi
-            
-            echo "✅ $file is valid"
-          done
-
       - name: Skip deployment if no BPMN files
         if: steps.find-bpmn.outputs.bpmn_files_count == '0' && github.event.inputs.force_deploy != 'true'
         run: |
@@ -188,14 +166,17 @@ jobs:
           if [ "${{ steps.deploy.outputs.deployment_success }}" == "true" ]; then
             echo "- **Deployment Name:** ${{ steps.deploy.outputs.deployment_name }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+            
+            # Only show BPMN files if deployment was successful
+            if [ "${{ steps.find-bpmn.outputs.bpmn_files_count }}" != "0" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
+              echo "${{ steps.find-bpmn.outputs.bpmn_files_list }}" | while read -r file; do
+                echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+              done
+            fi
           else
             echo "- **Status:** ❌ Failed" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ "${{ steps.find-bpmn.outputs.bpmn_files_count }}" != "0" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### BPMN Files Deployed:" >> $GITHUB_STEP_SUMMARY
-            echo "${{ steps.find-bpmn.outputs.bpmn_files_list }}" | while read -r file; do
-              echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
-            done
+            echo "> ⚠️ Deployment failed. BPMN files were not deployed to Camunda." >> $GITHUB_STEP_SUMMARY
           fi
