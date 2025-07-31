@@ -88,8 +88,8 @@ jobs:
           
           echo "✅ Connection to Camunda successful"
           
-          # Build deployment name with better format
-          DEPLOYMENT_NAME="${GITHUB_REPOSITORY##*/}-${GITHUB_REF_NAME}-$(echo $GITHUB_SHA | cut -c1-8)-$(date +%Y%m%d-%H%M%S)"
+          # Build stable deployment name (no timestamp to avoid unnecessary redeployments)
+          DEPLOYMENT_NAME="${GITHUB_REPOSITORY##*/}-${GITHUB_REF_NAME}"
           echo "deployment_name=$DEPLOYMENT_NAME" >> $GITHUB_OUTPUT
           
           echo "Deploying to Camunda with name: $DEPLOYMENT_NAME"
