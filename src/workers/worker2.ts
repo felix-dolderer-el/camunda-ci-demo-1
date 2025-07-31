@@ -1,19 +1,18 @@
 import { z } from "zod";
-import type { Task, TaskService } from "camunda-external-task-client-js";
+import { Variables, type Task, type TaskService } from "camunda-external-task-client-js";
 
 export async function work2Handler({ task, taskService }: { task: Task; taskService: TaskService }) {
-  console.log(task.variables);
+  const rawOrderNumber = task.variables.get("orderNumber");
+  const parsedOrderNumber = z.number().safeParse(rawOrderNumber);
 
-  const rawLocalOrderNumber = task.variables.get("localOrderNumber");
-  const parsedLocalOrderNumber = z.number().safeParse(rawLocalOrderNumber);
-
-  if (!parsedLocalOrderNumber.success) {
-    return await taskService.handleBpmnError(task, "localOrderNumber must be a number");
+  if (!parsedOrderNumber.success) {
+    return await taskService.handleBpmnError(task, "orderNumber must be a number");
   }
 
-  const localOrderNumber = parsedLocalOrderNumber.data;
+  const orderNumber = parsedOrderNumber.data;
 
-  task.variables.set("localeVariable", localOrderNumber.toString().split("").reverse().join(""));
+  const localVariables = new Variables();
+  localVariables.set("localeVariable", orderNumber.toString().split("").reverse().join(""));
 
-  await taskService.complete(task);
-} 
+  await taskService.complete(task, localVariables);
+}

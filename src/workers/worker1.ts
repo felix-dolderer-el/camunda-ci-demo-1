@@ -1,19 +1,29 @@
+import { Variables, type Task, type TaskService, type TypedValue } from "camunda-external-task-client-js";
 import { z } from "zod";
-import type { Task, TaskService } from "camunda-external-task-client-js";
 
 export async function work1Handler({ task, taskService }: { task: Task; taskService: TaskService }) {
-  console.log(task.variables);
+  const rawOrderNumber = task.variables.get("orderNumber");
+  const parsedOrderNumber = z.number().safeParse(rawOrderNumber);
 
-  const rawLocalOrderNumber = task.variables.get("localOrderNumber");
-  const parsedLocalOrderNumber = z.number().safeParse(rawLocalOrderNumber);
-
-  if (!parsedLocalOrderNumber.success) {
-    return await taskService.handleBpmnError(task, "localOrderNumber must be a number");
+  if (!parsedOrderNumber.success) {
+    console.log("orderNumber must be a number");
+    return await taskService.handleBpmnError(task, "orderNumber must be a number");
   }
 
-  const localOrderNumber = parsedLocalOrderNumber.data;
+  const orderNumber = parsedOrderNumber.data;
+  const localVariables = new Variables();
+  try {
+    localVariables.set("isOkay", orderNumber > 1_000 && orderNumber < 9_999);
+  } catch (error) {
+    console.log("error setting isOkay");
+    return;
+  }
 
-  task.variables.set("localIsOkay", localOrderNumber > 1_000_000 && localOrderNumber < 9_999_999);
-
-  await taskService.complete(task);
-} 
+  try {
+    console.log("completing task");
+    await taskService.complete(task, localVariables);
+    console.log("task completed");
+  } catch (error) {
+    console.log("error completing task");
+  }
+}

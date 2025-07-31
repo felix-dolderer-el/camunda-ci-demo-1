@@ -3,22 +3,15 @@
   <bpmn:process id="Process_12k9fi7" name="demo1" isExecutable="true" camunda:historyTimeToLive="7">
     <bpmn:startEvent id="StartEvent_1" name="start">
       <bpmn:extensionElements>
-        <camunda:formData businessKey="orderNumber">
-          <camunda:formField id="orderNumber" label="Order Number" type="long" defaultValue="0">
-            <camunda:properties />
-          </camunda:formField>
+        <camunda:formData>
+          <camunda:formField id="orderNumber" label="Order Number" type="long" defaultValue="10" />
         </camunda:formData>
       </bpmn:extensionElements>
       <bpmn:outgoing>Flow_1vsaqrm</bpmn:outgoing>
     </bpmn:startEvent>
     <bpmn:sequenceFlow id="Flow_1vsaqrm" sourceRef="StartEvent_1" targetRef="Activity_work1" />
     <bpmn:serviceTask id="Activity_work1" name="work1" camunda:type="external" camunda:topic="work1">
-      <bpmn:extensionElements>
-        <camunda:inputOutput>
-          <camunda:inputParameter name="localOrderNumber">orderNumber</camunda:inputParameter>
-          <camunda:outputParameter name="isOkay">localIsOkay</camunda:outputParameter>
-        </camunda:inputOutput>
-      </bpmn:extensionElements>
+      <bpmn:extensionElements />
       <bpmn:incoming>Flow_1vsaqrm</bpmn:incoming>
       <bpmn:outgoing>Flow_1y5ao5r</bpmn:outgoing>
     </bpmn:serviceTask>
@@ -29,15 +22,10 @@
     </bpmn:exclusiveGateway>
     <bpmn:sequenceFlow id="Flow_1y5ao5r" sourceRef="Activity_work1" targetRef="Gateway_IsOkay" />
     <bpmn:sequenceFlow id="Flow_09xp5ao" name="is okay" sourceRef="Gateway_IsOkay" targetRef="Activity_work2">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">isOkay</bpmn:conditionExpression>
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${isOkay}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:serviceTask id="Activity_work2" name="work2" camunda:type="external" camunda:topic="work2">
-      <bpmn:extensionElements>
-        <camunda:inputOutput>
-          <camunda:inputParameter name="localOrderNumber">orderNumber</camunda:inputParameter>
-          <camunda:outputParameter name="otherVariable">lolcalVariable</camunda:outputParameter>
-        </camunda:inputOutput>
-      </bpmn:extensionElements>
+      <bpmn:extensionElements />
       <bpmn:incoming>Flow_09xp5ao</bpmn:incoming>
       <bpmn:outgoing>Flow_09ndq1k</bpmn:outgoing>
     </bpmn:serviceTask>
@@ -49,67 +37,67 @@
       <bpmn:incoming>Flow_1sqc14x</bpmn:incoming>
     </bpmn:endEvent>
     <bpmn:sequenceFlow id="Flow_1sqc14x" name="is not okay" sourceRef="Gateway_IsOkay" targetRef="Event_otherEnd">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">!isOkay</bpmn:conditionExpression>
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${!isOkay}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_1">
     <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_12k9fi7">
-      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
-        <dc:Bounds x="182" y="112" width="36" height="36" />
-        <bpmndi:BPMNLabel>
-          <dc:Bounds x="189" y="155" width="23" height="14" />
-        </bpmndi:BPMNLabel>
-      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Activity_030amdu_di" bpmnElement="Activity_work1">
-        <dc:Bounds x="270" y="90" width="100" height="80" />
+        <dc:Bounds x="240" y="90" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Gateway_1hy2rc4_di" bpmnElement="Gateway_IsOkay" isMarkerVisible="true">
-        <dc:Bounds x="425" y="105" width="50" height="50" />
+        <dc:Bounds x="395" y="105" width="50" height="50" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="430" y="81" width="41" height="14" />
+          <dc:Bounds x="400" y="81" width="41" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Activity_0wlul5k_di" bpmnElement="Activity_work2">
-        <dc:Bounds x="530" y="90" width="100" height="80" />
+        <dc:Bounds x="500" y="90" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_0z8ib6t_di" bpmnElement="Event_end">
-        <dc:Bounds x="692" y="112" width="36" height="36" />
+        <dc:Bounds x="662" y="112" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="683" y="155" width="55" height="14" />
+          <dc:Bounds x="653" y="155" width="55" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_139gx9c_di" bpmnElement="Event_otherEnd">
-        <dc:Bounds x="532" y="222" width="36" height="36" />
+        <dc:Bounds x="502" y="222" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="527" y="265" width="47" height="14" />
+          <dc:Bounds x="497" y="265" width="47" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="152" y="112" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="159" y="155" width="23" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Flow_1vsaqrm_di" bpmnElement="Flow_1vsaqrm">
-        <di:waypoint x="218" y="130" />
-        <di:waypoint x="270" y="130" />
+        <di:waypoint x="188" y="130" />
+        <di:waypoint x="240" y="130" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_1y5ao5r_di" bpmnElement="Flow_1y5ao5r">
-        <di:waypoint x="370" y="130" />
-        <di:waypoint x="425" y="130" />
+        <di:waypoint x="340" y="130" />
+        <di:waypoint x="395" y="130" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_09xp5ao_di" bpmnElement="Flow_09xp5ao">
-        <di:waypoint x="475" y="130" />
-        <di:waypoint x="530" y="130" />
+        <di:waypoint x="445" y="130" />
+        <di:waypoint x="500" y="130" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="485" y="112" width="35" height="14" />
+          <dc:Bounds x="455" y="112" width="35" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1sqc14x_di" bpmnElement="Flow_1sqc14x">
+        <di:waypoint x="420" y="155" />
+        <di:waypoint x="420" y="240" />
+        <di:waypoint x="502" y="240" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="423" y="195" width="54" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_09ndq1k_di" bpmnElement="Flow_09ndq1k">
-        <di:waypoint x="630" y="130" />
-        <di:waypoint x="692" y="130" />
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Flow_1sqc14x_di" bpmnElement="Flow_1sqc14x">
-        <di:waypoint x="450" y="155" />
-        <di:waypoint x="450" y="240" />
-        <di:waypoint x="532" y="240" />
-        <bpmndi:BPMNLabel>
-          <dc:Bounds x="453" y="195" width="54" height="14" />
-        </bpmndi:BPMNLabel>
+        <di:waypoint x="600" y="130" />
+        <di:waypoint x="662" y="130" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
