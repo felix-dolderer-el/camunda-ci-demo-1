@@ -38,7 +38,8 @@ For detailed API documentation, see the [official Camunda REST API docs](https:/
 
 ## Code Examples
 
-### Kotlin Example
+<details>
+<summary><strong>📋 Kotlin Example</strong></summary>
 
 ```kotlin
 import java.io.File
@@ -173,7 +174,10 @@ fun main() {
 }
 ```
 
-### Shell Script Example
+</details>
+
+<details>
+<summary><strong>🐚 Shell Script Example</strong></summary>
 
 ```bash
 #!/bin/bash
@@ -227,7 +231,10 @@ echo "Deployment successful"
 echo "$RESPONSE_BODY" | jq .
 ```
 
-### .NET Example
+</details>
+
+<details>
+<summary><strong>🔷 .NET Example</strong></summary>
 
 ```csharp
 using System;
@@ -386,6 +393,8 @@ class Program
     }
 }
 ```
+
+</details>
 
 ## Common Issues
 
