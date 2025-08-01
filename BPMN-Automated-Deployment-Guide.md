@@ -2,7 +2,7 @@
 
 ## Overview
 
-Automatically deploy BPMN process definitions to Camunda 7 with every release to ensure your business processes are always aligned with your application code.
+Automatically deploy BPMN process definitions to Camunda 7 with every release to ensure your business processes are always aligned with your application code. With every deploy we push out to one of our customers we need to ensure that the deployed process versions match the deployed sourcecode in the customer environment.
 
 ## Prerequisites
 
