@@ -4,6 +4,24 @@
 
 This guide provides a language-agnostic approach to implementing automated deployments of BPMN (Business Process Model and Notation) files to Camunda 7 engines. The process described here can be adapted to any programming language or deployment tool while maintaining the same core functionality.
 
+### Automate BPMN Deployments
+
+We want to automatically deploy BPMN process definitions with every update / release on the customer system. This guide outlines what needs to be done to deploy ressources to Camunda 7. Making sure this happens on startup (or more generally implementing triggers for this process) is up to you.
+
+This approach of deploying with each release is necessary to guarantee that your business processes are always aligned with your application code, eliminating the risk of version mismatches between your application logic and process definitions.
+
+### The Automated Deployment Process
+
+The automated deployment workflow follows these key steps:
+
+1. **Change Detection**: Identify which BPMN files to deploy *(optional - you can also deploy all files)*
+2. **Authentication**: Securely authenticate with the Camunda engine using API credentials
+3. **Deployment**: Upload all BPMN files via Camunda's REST API in a single deployment request
+4. **Verification**: Confirm successful deployment and validate that processes are available
+5. **Error Handling**: Gracefully handle failures with retry logic and meaningful error reporting
+
+**Recommendation**: Deploy all BPMN resources together in a single deployment request rather than making separate API calls for each file. This ensures atomic deployments and better performance.
+
 ## Table of Contents
 
 1. [Overview](#1-overview)
@@ -121,11 +139,13 @@ Expected response: HTTP 200 with JSON containing version information:
 - `enable-duplicate-filtering`: Boolean - Filter duplicate deployments (optional, default: false, recommended: `true`)
 - `file`: File - BPMN file(s) to deploy (required, can be multiple files)
 
+**Recommendation**: Deploy all BPMN resources together in a single deployment request rather than making separate API calls for each file. This ensures atomic deployments and better performance.
+
 For detailed request structure and examples, refer to the [official Camunda REST API documentation](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
 
 ### Step 3: Verify Deployment
 
-After successful deployment, verify it exists:
+After successful deployment, verify the deployment exists:
 
 **Endpoint**: `GET {CAMUNDA_URL}/engine-rest/deployment?name={deployment_name}`
 
@@ -133,9 +153,7 @@ After successful deployment, verify it exists:
 
 ## 6. Change Detection
 
-### Option 1: Version Control Integration
-
-If using Git or similar VCS:
+### Option 1: Version Control Integration (Git)
 
 1. **Get Changed Files**
    ```
@@ -148,8 +166,6 @@ If using Git or similar VCS:
    ```
 
 ### Option 2: File Comparison
-
-Without VCS, implement file comparison:
 
 1. **Checksum-based**
    - Calculate hash (MD5/SHA256) of each BPMN file
@@ -168,10 +184,10 @@ For simplicity, always deploy all BPMN files and rely on Camunda's duplicate fil
 
 ### Response Handling
 
-For detailed information about success and error response formats, refer to the [official Camunda REST API documentation for deployment creation](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
-
 **Success**: HTTP 200 with deployment details including deployed process definitions
 **Error**: HTTP 400/500 with error details
+
+For detailed information about success and error response formats, refer to the [official Camunda REST API documentation for deployment creation](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
 
 ## 8. Error Handling
 
@@ -199,7 +215,7 @@ For detailed information about success and error response formats, refer to the 
 
 ### Retry Strategy
 
-Implement exponential backoff for transient failures:
+Implement exponential backoff for transient failures. e.g.:
 ```
 retry_delays = [1, 2, 4, 8, 16] seconds
 max_retries = 5
@@ -259,87 +275,139 @@ Maintain deployment history:
 
 ## 10. Code Examples
 
-### Python Example
+### Kotlin Example
 
-```python
-import requests
-from pathlib import Path
-import base64
+```kotlin
+import java.io.File
+import java.util.Base64
+import kotlinx.coroutines.runBlocking
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.IOException
 
-class CamundaDeployer:
-    def __init__(self, url, username, password):
-        self.url = url.rstrip('/')
-        self.auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+class CamundaDeployer(
+    private val url: String,
+    private val username: String,
+    private val password: String
+) {
+    private val client = OkHttpClient()
+    private val auth = Base64.getEncoder().encodeToString("$username:$password".toByteArray())
     
-    def test_connection(self):
-        """Test connection to Camunda"""
-        headers = {"Authorization": f"Basic {self.auth}"}
-        response = requests.get(
-            f"{self.url}/engine-rest/version",
-            headers=headers
-        )
-        return response.status_code == 200
-    
-    def deploy_bpmn_files(self, deployment_name, bpmn_files):
-        """Deploy BPMN files to Camunda"""
-        headers = {"Authorization": f"Basic {self.auth}"}
+    fun testConnection(): Boolean {
+        val request = Request.Builder()
+            .url("${url.trimEnd('/')}/engine-rest/version")
+            .addHeader("Authorization", "Basic $auth")
+            .build()
         
-        # Prepare multipart form data
-        files = []
-        data = {
-            "deployment-name": deployment_name,
-            "deploy-changed-only": "true",
-            "enable-duplicate-filtering": "true"
+        return try {
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
+        } catch (e: IOException) {
+            false
+        }
+    }
+    
+    fun deployBpmnFiles(deploymentName: String, bpmnFiles: List<String>): Pair<Boolean, String> {
+        val multipartBuilder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("deployment-name", deploymentName)
+            .addFormDataPart("deploy-changed-only", "true")
+            .addFormDataPart("enable-duplicate-filtering", "true")
+        
+        // Add BPMN files
+        bpmnFiles.forEach { filePath ->
+            val file = File(filePath)
+            if (file.exists()) {
+                multipartBuilder.addFormDataPart(
+                    "file",
+                    file.name,
+                    file.asRequestBody("application/xml".toMediaType())
+                )
+            }
         }
         
-        # Add BPMN files
-        for file_path in bpmn_files:
-            with open(file_path, 'rb') as f:
-                files.append(('file', (Path(file_path).name, f, 'application/xml')))
+        val request = Request.Builder()
+            .url("${url.trimEnd('/')}/engine-rest/deployment/create")
+            .addHeader("Authorization", "Basic $auth")
+            .post(multipartBuilder.build())
+            .build()
         
-        # Send deployment request
-        response = requests.post(
-            f"{self.url}/engine-rest/deployment/create",
-            headers=headers,
-            data=data,
-            files=files
-        )
-        
-        return response.status_code == 200, response.json()
+        return try {
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    Pair(true, responseBody)
+                } else {
+                    Pair(false, responseBody)
+                }
+            }
+        } catch (e: IOException) {
+            Pair(false, e.message ?: "Network error")
+        }
+    }
     
-    def verify_deployment(self, deployment_name):
-        """Verify deployment exists"""
-        headers = {"Authorization": f"Basic {self.auth}"}
-        response = requests.get(
-            f"{self.url}/engine-rest/deployment",
-            headers=headers,
-            params={"name": deployment_name}
-        )
+    fun verifyDeployment(deploymentName: String): Boolean {
+        val request = Request.Builder()
+            .url("${url.trimEnd('/')}/engine-rest/deployment?name=$deploymentName")
+            .addHeader("Authorization", "Basic $auth")
+            .build()
         
-        if response.status_code == 200:
-            deployments = response.json()
-            return any(d['name'] == deployment_name for d in deployments)
-        return False
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string() ?: "[]"
+                    val deployments = JSONObject("{\"deployments\": $responseBody}")
+                    val deploymentsArray = deployments.getJSONArray("deployments")
+                    
+                    for (i in 0 until deploymentsArray.length()) {
+                        val deployment = deploymentsArray.getJSONObject(i)
+                        if (deployment.getString("name") == deploymentName) {
+                            return true
+                        }
+                    }
+                    false
+                } else {
+                    false
+                }
+            }
+        } catch (e: IOException) {
+            false
+        }
+    }
+}
 
-# Usage
-deployer = CamundaDeployer(
-    url="https://camunda.example.com",
-    username="admin",
-    password="password"
-)
-
-if deployer.test_connection():
-    # Use stable deployment name without timestamps or random values
-    # This ensures Camunda's duplicate filtering works correctly
-    success, result = deployer.deploy_bpmn_files(
-        deployment_name="my-project-main",  # Stable name format: {project}-{branch}
-        bpmn_files=["process1.bpmn", "process2.bpmn"]
+// Usage
+fun main() {
+    val deployer = CamundaDeployer(
+        url = "https://camunda.example.com",
+        username = "admin",
+        password = "password"
     )
     
-    if success:
-        print(f"Deployment successful: {result['id']}")
-    else:
-        print(f"Deployment failed: {result}")
+    if (!deployer.testConnection()) {
+        println("Cannot connect to Camunda")
+        return
+    }
+    
+    // Use stable deployment name without timestamps or random values
+    // This ensures Camunda's duplicate filtering works correctly
+    val (success, result) = deployer.deployBpmnFiles(
+        deploymentName = "my-project-main", // Stable name format: {project}-{branch}
+        bpmnFiles = listOf("process1.bpmn", "process2.bpmn")
+    )
+    
+    if (!success) {
+        println("Deployment failed: $result")
+        return
+    }
+    
+    val jsonResult = JSONObject(result)
+    println("Deployment successful: ${jsonResult.getString("id")}")
+}
 ```
 
 ### Shell Script Example
@@ -386,114 +454,174 @@ RESPONSE=$(curl -s -w "\n%{http_code}" \
 HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
 RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-  echo "Deployment successful"
-  echo "$RESPONSE_BODY" | jq .
-else
+if [ "$HTTP_CODE" -ne 200 ]; then
   echo "Deployment failed with HTTP $HTTP_CODE"
   echo "$RESPONSE_BODY"
   exit 1
 fi
+
+echo "Deployment successful"
+echo "$RESPONSE_BODY" | jq .
 ```
 
-### Node.js Example
+### .NET Example
 
-```javascript
-const fs = require('fs');
-const path = require('path');
-const FormData = require('form-data');
-const axios = require('axios');
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Linq;
 
-class CamundaDeployer {
-  constructor(url, username, password) {
-    this.url = url.replace(/\/$/, '');
-    this.auth = Buffer.from(`${username}:${password}`).toString('base64');
-  }
+public class CamundaDeployer
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _url;
+    private readonly string _authHeader;
 
-  async testConnection() {
-    try {
-      const response = await axios.get(
-        `${this.url}/engine-rest/version`,
+    public CamundaDeployer(string url, string username, string password)
+    {
+        _url = url.TrimEnd('/');
+        _httpClient = new HttpClient();
+        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
+        _authHeader = $"Basic {credentials}";
+    }
+
+    public async Task<bool> TestConnectionAsync()
+    {
+        try
         {
-          headers: { Authorization: `Basic ${this.auth}` }
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{_url}/engine-rest/version");
+            request.Headers.Add("Authorization", _authHeader);
+            
+            var response = await _httpClient.SendAsync(request);
+            return response.IsSuccessStatusCode;
         }
-      );
-      return response.status === 200;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async deployBpmnFiles(deploymentName, bpmnFiles) {
-    const form = new FormData();
-    
-    // Add form fields
-    form.append('deployment-name', deploymentName);
-    form.append('deploy-changed-only', 'true');
-    form.append('enable-duplicate-filtering', 'true');
-    
-    // Add BPMN files
-    for (const filePath of bpmnFiles) {
-      const fileName = path.basename(filePath);
-      const fileStream = fs.createReadStream(filePath);
-      form.append('file', fileStream, {
-        filename: fileName,
-        contentType: 'application/xml'
-      });
-    }
-
-    try {
-      const response = await axios.post(
-        `${this.url}/engine-rest/deployment/create`,
-        form,
+        catch (Exception)
         {
-          headers: {
-            ...form.getHeaders(),
-            Authorization: `Basic ${this.auth}`
-          }
+            return false;
         }
-      );
-      
-      return { success: true, data: response.data };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data || error.message 
-      };
     }
-  }
+
+    public async Task<(bool Success, string Result)> DeployBpmnFilesAsync(string deploymentName, IEnumerable<string> bpmnFiles)
+    {
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            
+            // Add form fields
+            content.Add(new StringContent(deploymentName), "deployment-name");
+            content.Add(new StringContent("true"), "deploy-changed-only");
+            content.Add(new StringContent("true"), "enable-duplicate-filtering");
+            
+            // Add BPMN files
+            foreach (var filePath in bpmnFiles)
+            {
+                if (File.Exists(filePath))
+                {
+                    var fileName = Path.GetFileName(filePath);
+                    var fileContent = new StreamContent(File.OpenRead(filePath));
+                    fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/xml");
+                    content.Add(fileContent, "file", fileName);
+                }
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{_url}/engine-rest/deployment/create");
+            request.Headers.Add("Authorization", _authHeader);
+            request.Content = content;
+
+            var response = await _httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                return (true, responseBody);
+            }
+            else
+            {
+                return (false, responseBody);
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    public async Task<bool> VerifyDeploymentAsync(string deploymentName)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{_url}/engine-rest/deployment?name={deploymentName}");
+            request.Headers.Add("Authorization", _authHeader);
+            
+            var response = await _httpClient.SendAsync(request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync();
+                var deployments = JsonSerializer.Deserialize<List<DeploymentInfo>>(responseBody);
+                return deployments?.Any(d => d.Name == deploymentName) ?? false;
+            }
+            
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _httpClient?.Dispose();
+    }
+}
+
+public class DeploymentInfo
+{
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public string DeploymentTime { get; set; }
 }
 
 // Usage
-async function deploy() {
-  const deployer = new CamundaDeployer(
-    process.env.CAMUNDA_URL,
-    process.env.CAMUNDA_USER,
-    process.env.CAMUNDA_PASS
-  );
+class Program
+{
+    static async Task Main(string[] args)
+    {
+        using var deployer = new CamundaDeployer(
+            url: Environment.GetEnvironmentVariable("CAMUNDA_URL") ?? "https://camunda.example.com",
+            username: Environment.GetEnvironmentVariable("CAMUNDA_USER") ?? "admin",
+            password: Environment.GetEnvironmentVariable("CAMUNDA_PASS") ?? "password"
+        );
 
-  if (await deployer.testConnection()) {
-    // Use stable deployment name - critical for duplicate filtering
-    const deploymentName = 'my-project-main'; // Format: {project}-{branch}
-    
-    const result = await deployer.deployBpmnFiles(
-      deploymentName,
-      ['process1.bpmn', 'process2.bpmn']
-    );
-    
-    if (result.success) {
-      console.log('Deployment successful:', result.data.id);
-    } else {
-      console.error('Deployment failed:', result.error);
-      process.exit(1);
+        if (!await deployer.TestConnectionAsync())
+        {
+            Console.WriteLine("Cannot connect to Camunda");
+            Environment.Exit(1);
+        }
+
+        // Use stable deployment name without timestamps or random values
+        // This ensures Camunda's duplicate filtering works correctly
+        var (success, result) = await deployer.DeployBpmnFilesAsync(
+            deploymentName: "my-project-main", // Stable name format: {project}-{branch}
+            bpmnFiles: new[] { "process1.bpmn", "process2.bpmn" }
+        );
+
+        if (!success)
+        {
+            Console.WriteLine($"Deployment failed: {result}");
+            Environment.Exit(1);
+        }
+
+        var jsonResult = JsonSerializer.Deserialize<JsonElement>(result);
+        Console.WriteLine($"Deployment successful: {jsonResult.GetProperty("id").GetString()}");
     }
-  } else {
-    console.error('Cannot connect to Camunda');
-    process.exit(1);
-  }
 }
-
-deploy();
 ```
 
 ## 11. Troubleshooting
