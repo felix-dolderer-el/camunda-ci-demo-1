@@ -1,279 +1,42 @@
 # BPMN Automated Deployment Guide
 
-## 1. Overview
+## Overview
 
-This guide provides a language-agnostic approach to implementing automated deployments of BPMN (Business Process Model and Notation) files to Camunda 7 engines. The process described here can be adapted to any programming language or deployment tool while maintaining the same core functionality.
+Automatically deploy BPMN process definitions to Camunda 7 with every release to ensure your business processes are always aligned with your application code.
 
-### Automate BPMN Deployments
+## Prerequisites
 
-We want to automatically deploy BPMN process definitions with every update / release on the customer system. This guide outlines what needs to be done to deploy ressources to Camunda 7. Making sure this happens on startup (or more generally implementing triggers for this process) is up to you.
+- Running Camunda 7 instance
+- Network access to Camunda REST API
+- Valid BPMN 2.0 files (`.bpmn` extension)
+- Camunda credentials (username/password)
 
-This approach of deploying with each release is necessary to guarantee that your business processes are always aligned with your application code, eliminating the risk of version mismatches between your application logic and process definitions.
+## Key Concepts
 
-### The Automated Deployment Process
+### Stable Deployment Names ⚠️ CRITICAL
 
-The automated deployment workflow follows these key steps:
+Use stable deployment names without timestamps or random values for Camunda's duplicate filtering to work:
 
-1. **Change Detection**: Identify which BPMN files to deploy *(optional - you can also deploy all files)*
-2. **Authentication**: Securely authenticate with the Camunda engine using API credentials
-3. **Deployment**: Upload all BPMN files via Camunda's REST API in a single deployment request
-4. **Verification**: Confirm successful deployment and validate that processes are available
-5. **Error Handling**: Gracefully handle failures with retry logic and meaningful error reporting
+**Good**: `my-project-main`, `orderprocess-prod-main`  
+**Bad**: `my-project-20231115-103045`, `orderprocess-${BUILD_NUMBER}`
 
-**Recommendation**: Deploy all BPMN resources together in a single deployment request rather than making separate API calls for each file. This ensures atomic deployments and better performance.
+### Deployment Process
 
-## Table of Contents
-
-1. [Overview](#1-overview)
-2. [Prerequisites](#2-prerequisites)
-3. [Core Concepts](#3-core-concepts)
-4. [Authentication](#4-authentication)
-5. [Deployment Process](#5-deployment-process)
-6. [Change Detection](#6-change-detection)
-7. [API Implementation](#7-api-implementation)
-8. [Error Handling](#8-error-handling)
-9. [Best Practices](#9-best-practices)
-10. [Code Examples](#10-code-examples)
-11. [Troubleshooting](#11-troubleshooting)
-12. [Security Considerations](#12-security-considerations)
-13. [Conclusion](#13-conclusion)
-
-## 2. Prerequisites
-
-Before implementing automated BPMN deployments, ensure you have:
-
-1. **Camunda 7 Engine** - A running Camunda 7 instance (version 7.x)
-2. **API Access** - Network connectivity to the Camunda REST API
-3. **Credentials** - Username and password for Camunda authentication
-4. **BPMN Files** - Valid BPMN 2.0 XML files (`.bpmn` extension)
-
-### Required Information
-
-- `CAMUNDA_URL`: Base URL of your Camunda instance (e.g., `https://your-camunda-server.com`)
-- `CAMUNDA_USER`: Username for authentication
-- `CAMUNDA_PASS`: Password for authentication
-
-## 3. Core Concepts
-
-### What is BPMN Deployment?
-
-BPMN deployment is the process of uploading business process definitions to the Camunda engine, making them available for execution. Each deployment:
-
-- Contains one or more BPMN files
-- Has a unique deployment name
-- Can filter duplicates to avoid redundant deployments
-- Tracks deployment history and versions
-
-### Key Deployment Features
-
-1. **Deploy Changed Only**: Only deploy files that have been modified
-2. **Duplicate Filtering**: Prevent redeployment of unchanged processes (requires stable deployment names)
-3. **Atomic Deployments**: All files in a deployment succeed or fail together
-4. **Version Management**: Camunda automatically versions process definitions
-
-### Stable Deployment Names
-
-A stable deployment name is crucial for Camunda's duplicate filtering mechanism. The deployment name, combined with resource names and content hashes, determines whether a deployment is considered a duplicate. If the deployment name changes between deployments (e.g., by including timestamps), Camunda will create new process definitions even when the BPMN content is identical, leading to:
-
-- Multiple versions of the same process
-- Increased database storage
-- Confusion about which version is active
-- Defeated purpose of duplicate filtering
-
-## 4. Authentication
-
-Camunda 7 uses HTTP Basic Authentication for API access.
-
-### Authentication Headers
-
-```
-Authorization: Basic base64(username:password)
-```
-
-### Testing Connectivity
-
-Before deployment, verify your connection:
-
-```
-GET {CAMUNDA_URL}/engine-rest/version
-Headers:
-  Authorization: Basic {base64_encoded_credentials}
-```
-
-Expected response: HTTP 200 with JSON containing version information:
-```json
-{
-  "version": "7.23.0"
-}
-```
-
-## 5. Deployment Process
-
-### Step 1: Prepare Deployment
-
-1. **Collect BPMN Files**
-   - Identify all `.bpmn` files to deploy
-   - Validate XML structure (well-formed XML)
-   - Ensure files are accessible in your build environment
-
-2. **Generate Deployment Name**
-   
-   **⚠️ IMPORTANT**: The deployment name MUST be stable across deployments for Camunda's duplicate filtering to work correctly. Use a consistent naming pattern without timestamps or random values.
-   
-   ```
-   deployment_name = "{project_name}-{branch_name}"
-   ```
-   Example: `my-project-main`
-   
-   **Why stable names matter**: Camunda uses the deployment name along with resource names and content hashes to detect duplicates. If the deployment name changes with each deployment (e.g., includes timestamps), Camunda will treat each deployment as new, creating duplicate process definitions and defeating the purpose of duplicate filtering.
-
-### Step 2: Create Deployment
-
-**Endpoint**: `POST {CAMUNDA_URL}/engine-rest/deployment/create`
-
-**Request Type**: `multipart/form-data`
+1. **Test Connection**: `GET {CAMUNDA_URL}/engine-rest/version`
+2. **Deploy Files**: `POST {CAMUNDA_URL}/engine-rest/deployment/create`
+3. **Verify**: `GET {CAMUNDA_URL}/engine-rest/deployment?name={deployment_name}`
 
 **Form Parameters**:
-- `deployment-name`: String - Name of the deployment (required)
-- `deploy-changed-only`: Boolean - Only deploy changed resources (optional, default: false, recommended: `true`)
-- `enable-duplicate-filtering`: Boolean - Filter duplicate deployments (optional, default: false, recommended: `true`)
-- `file`: File - BPMN file(s) to deploy (required, can be multiple files)
+- `deployment-name`: String (required)
+- `deploy-changed-only`: true (recommended)
+- `enable-duplicate-filtering`: true (recommended)
+- `file`: BPMN file(s) (required)
 
-**Recommendation**: Deploy all BPMN resources together in a single deployment request rather than making separate API calls for each file. This ensures atomic deployments and better performance.
+## API Documentation
 
-For detailed request structure and examples, refer to the [official Camunda REST API documentation](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
+For detailed API documentation, see the [official Camunda REST API docs](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
 
-### Step 3: Verify Deployment
-
-After successful deployment, verify the deployment exists:
-
-**Endpoint**: `GET {CAMUNDA_URL}/engine-rest/deployment?name={deployment_name}`
-
-**Expected Response**: JSON array containing the deployment details.
-
-## 6. Change Detection
-
-### Option 1: Version Control Integration (Git)
-
-1. **Get Changed Files**
-   ```
-   git diff --name-only --diff-filter=ACM {previous_commit} {current_commit} | grep '\.bpmn$'
-   ```
-
-2. **First Deployment**
-   ```
-   git ls-files | grep '\.bpmn$'
-   ```
-
-### Option 2: File Comparison
-
-1. **Checksum-based**
-   - Calculate hash (MD5/SHA256) of each BPMN file
-   - Store hashes after successful deployment
-   - Compare current hashes with stored values
-
-2. **Timestamp-based**
-   - Track last deployment timestamp
-   - Compare file modification times
-
-### Option 3: Always Deploy
-
-For simplicity, always deploy all BPMN files and rely on Camunda's duplicate filtering.
-
-## 7. API Implementation
-
-### Response Handling
-
-**Success**: HTTP 200 with deployment details including deployed process definitions
-**Error**: HTTP 400/500 with error details
-
-For detailed information about success and error response formats, refer to the [official Camunda REST API documentation for deployment creation](https://docs.camunda.org/rest/camunda-bpm-platform/7.23/#tag/Deployment/operation/createDeployment).
-
-## 8. Error Handling
-
-### Common Errors and Solutions
-
-1. **Authentication Failed (401)**
-   - Verify credentials
-   - Check authorization header format
-   - Ensure user has deployment permissions
-
-2. **Connection Failed**
-   - Verify network connectivity
-   - Check firewall rules
-   - Validate Camunda URL
-
-3. **Invalid BPMN (400)**
-   - Validate XML structure
-   - Check BPMN schema compliance
-   - Ensure process IDs are unique
-
-4. **Server Error (500)**
-   - Check Camunda server logs
-   - Verify server resources
-   - Ensure database connectivity
-
-### Retry Strategy
-
-Implement exponential backoff for transient failures. e.g.:
-```
-retry_delays = [1, 2, 4, 8, 16] seconds
-max_retries = 5
-```
-
-## 9. Best Practices
-
-### 1. Deployment Naming Convention
-
-**Critical**: Use stable, consistent deployment names without timestamps or random values. This is essential for Camunda's duplicate filtering mechanism to work properly.
-
-```
-{project}-{environment}-{branch}
-```
-
-Good examples (stable names):
-- `orderprocess-prod-main`
-- `payment-staging-feature-123`
-- `customer-service-dev-develop`
-
-Bad examples (unstable names):
-- `orderprocess-prod-main-20231115-103045` ❌ (includes timestamp)
-- `payment-staging-feature-123-uuid-abc123` ❌ (includes random UUID)
-- `customer-service-dev-${BUILD_NUMBER}` ❌ (changes with each build)
-
-**Remember**: Changing the deployment name will cause Camunda to create new process definition versions even if the BPMN content hasn't changed.
-
-### 2. Environment Separation
-
-- Use different Camunda instances for dev/staging/prod
-- Implement environment-specific configuration
-- Never hardcode credentials
-
-### 3. Pre-deployment Validation
-
-Before deployment:
-- Validate XML syntax
-- Check for required process IDs
-- Verify no ID conflicts
-- Test locally if possible
-
-### 4. Logging and Monitoring
-
-Log all deployment activities:
-- Timestamp
-- Files deployed
-- Success/failure status
-- Error messages
-- Deployment ID
-
-### 5. Rollback Strategy
-
-Maintain deployment history:
-- Keep previous BPMN versions
-- Document deployment-to-commit mapping
-- Implement rollback procedures
-
-## 10. Code Examples
+## Code Examples
 
 ### Kotlin Example
 
@@ -624,60 +387,9 @@ class Program
 }
 ```
 
-## 11. Troubleshooting
+## Common Issues
 
-### Debug Checklist
-
-1. **Connection Issues**
-   - [ ] Verify Camunda URL is correct
-   - [ ] Check network connectivity
-   - [ ] Confirm firewall allows HTTPS/HTTP traffic
-   - [ ] Test with curl or browser
-
-2. **Authentication Issues**
-   - [ ] Verify username and password
-   - [ ] Check user permissions in Camunda
-   - [ ] Ensure proper encoding of credentials
-
-3. **Deployment Failures**
-   - [ ] Validate BPMN XML syntax
-   - [ ] Check for unique process IDs
-   - [ ] Verify file paths are correct
-   - [ ] Review Camunda server logs
-
-4. **Performance Issues**
-   - [ ] Deploy files in batches
-   - [ ] Implement proper timeouts
-   - [ ] Consider async processing
-
-## 12. Security Considerations
-
-1. **Credential Management**
-   - Never hardcode credentials
-   - Use environment variables
-   - Implement secret management
-   - Rotate credentials regularly
-
-2. **Network Security**
-   - Use HTTPS for API calls
-   - Implement IP whitelisting if possible
-   - Use VPN for sensitive environments
-   - Monitor API access logs
-
-3. **File Validation**
-   - Validate BPMN files before deployment
-   - Scan for malicious content
-   - Limit file sizes
-   - Implement access controls
-
-## 13. Conclusion
-
-This guide provides a comprehensive, language-agnostic approach to implementing automated BPMN deployments. The key principles remain the same regardless of your technology stack:
-
-1. Authenticate securely with Camunda
-2. Prepare BPMN files for deployment
-3. Use the REST API to create deployments
-4. Handle errors gracefully
-5. Verify successful deployments
-
-By following these guidelines, you can build a robust automated deployment system that works reliably in environments behind firewalls or with restricted network access.
+- **401 Unauthorized**: Check credentials and user permissions
+- **400 Bad Request**: Validate BPMN XML syntax and unique process IDs
+- **Connection Failed**: Verify network connectivity and Camunda URL
+- **Duplicate Deployments**: Ensure stable deployment names (no timestamps/UUIDs)
